@@ -1,0 +1,81 @@
+services:
+  # ── FastAPI application ──────────────────────────────────────
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/osint
+      - REDIS_URL=redis://redis:6379/0
+      - PHONEINFOGA_URL=http://phoneinfoga:5000
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── ARQ background worker ───────────────────────────────────
+  worker:
+    build: .
+    command: [ "python", "-m", "arq", "app.workers.investigation_worker.WorkerSettings" ]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/osint
+      - REDIS_URL=redis://redis:6379/0
+      - PHONEINFOGA_URL=http://phoneinfoga:5000
+      - ENABLE_BACKGROUND_WORKERS=true
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── PostgreSQL ───────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: osint
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── PhoneInfoga ──────────────────────────────────────────────
+  phoneinfoga:
+    image: sundowndev/phoneinfoga:latest
+    platform: linux/amd64
+    command: [ "serve", "--port", "5000" ]
+    ports:
+      - "5001:5000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
